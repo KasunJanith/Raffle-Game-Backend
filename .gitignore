@@ -36,3 +36,9 @@ build/
 # Temporary files
 tmp/
 temp/
+
+# Service account and credentials
+service-account.json
+service-account-*.json
+*.pem
+*.key
