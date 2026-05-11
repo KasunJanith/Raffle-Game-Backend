@@ -1,6 +1,7 @@
 import express, { json } from "express";
 import cors from "cors";
 import { google } from "googleapis";
+import { setupRaffleRoutes } from "./raffleRoutes.js";
 
 const app = express();
 app.use(cors());
@@ -30,7 +31,8 @@ process.on("unhandledRejection", (err) => {
 });
 
 // SHEET ID
-const spreadsheetId = "1a9ZmrJFkQr5O9z4oMXrJYUYEKJwNi_bm7ennxUzy_Z8";
+const spreadsheetId = "1gXlGXkaSbPQx9y8X_hO4wh4MNMQldRu0Km8N9Ax1R8w";
+
 
 // ===============================
 // HELPERS
@@ -1421,6 +1423,9 @@ app.post("/spin-result/submit", async (req, res) => {
     res.status(500).json({ success: false });
   }
 });
+
+// ================= SETUP RAFFLE ROUTES =================
+setupRaffleRoutes(app, sheets, spreadsheetId, normalizePhone);
 
 // ================= START =================
 app.listen(PORT, () => {
