@@ -33,7 +33,6 @@ process.on("unhandledRejection", (err) => {
 // SHEET ID
 const spreadsheetId = "1gXlGXkaSbPQx9y8X_hO4wh4MNMQldRu0Km8N9Ax1R8w";
 
-
 // ===============================
 // HELPERS
 // ===============================

@@ -1,7 +1,7 @@
 // Raffle Endpoints for the new raffle draw system
 import express from "express";
 
-export async function setupRaffleRoutes(app, sheets, spreadsheetId, normalizePhone) {
+export function setupRaffleRoutes(app, sheets, spreadsheetId, normalizePhone) {
   // ========================
   // GET PARTICIPANTS
   // ========================
@@ -27,7 +27,8 @@ export async function setupRaffleRoutes(app, sheets, spreadsheetId, normalizePho
         participants,
       });
     } catch (error) {
-      console.error("❌ Error fetching participants:", error.message);      res.status(500).json({
+      console.error("❌ Error fetching participants:", error.message);
+      res.status(500).json({
         success: false,
         message: "Failed to fetch participants",
         error: error.message,
@@ -114,20 +115,19 @@ export async function setupRaffleRoutes(app, sheets, spreadsheetId, normalizePho
       });
     }
   });
-
   // ========================
   // ADD NEW PARTICIPANT
   // ========================
   app.post("/api/raffle/add-participant", async (req, res) => {
     try {
-      const { name, phone, email } = req.body;      if (!name || !phone) {
+      const { name, phone, email } = req.body;
+
+      if (!name || !phone) {
         return res.status(400).json({
           success: false,
           message: "Name and phone are required",
         });
-      }
-
-      await sheets.spreadsheets.values.append({
+      }      await sheets.spreadsheets.values.append({
         spreadsheetId,
         range: "Players!A:C",
         valueInputOption: "USER_ENTERED",
@@ -141,7 +141,8 @@ export async function setupRaffleRoutes(app, sheets, spreadsheetId, normalizePho
       res.json({
         success: true,
         message: "Participant added successfully",
-      });    } catch (error) {
+      });
+    } catch (error) {
       console.error("❌ Error adding participant:", error.message);
       res.status(500).json({
         success: false,
@@ -151,4 +152,4 @@ export async function setupRaffleRoutes(app, sheets, spreadsheetId, normalizePho
     }
   });
 }
-  
+
