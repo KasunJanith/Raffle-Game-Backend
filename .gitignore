@@ -42,3 +42,4 @@ service-account.json
 service-account-*.json
 *.pem
 *.key
+"service-account.json" 
