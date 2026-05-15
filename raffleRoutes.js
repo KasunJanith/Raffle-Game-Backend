@@ -1,6 +1,18 @@
 // Raffle Endpoints for the new raffle draw system
 import express from "express";
 
+// Helper: get the internal sheet ID for a given sheet name
+async function getSheetId(sheets, spreadsheetId, sheetName) {
+  const res = await sheets.spreadsheets.get({
+    spreadsheetId,
+    ranges: [],
+    includeGridData: false,
+  });
+  const sheet = res.data.sheets.find(s => s.properties.title === sheetName);
+  if (!sheet) throw new Error(`Sheet "${sheetName}" not found`);
+  return sheet.properties.sheetId;
+}
+
 export function setupRaffleRoutes(app, sheets, spreadsheetId, normalizePhone) {
   // ========================
   // GET PARTICIPANTS
@@ -37,12 +49,11 @@ export function setupRaffleRoutes(app, sheets, spreadsheetId, normalizePhone) {
   });
 
   // ========================
-  // SAVE WINNER
+  // SAVE WINNER (and remove from Players)
   // ========================
   app.post("/api/raffle/save-winner", async (req, res) => {
     try {
-      const { participantId, participantName, participantPhone, timestamp } =
-        req.body;
+      const { participantId, participantName, participantPhone, timestamp } = req.body;
 
       if (!participantName || !participantPhone) {
         return res.status(400).json({
@@ -51,7 +62,7 @@ export function setupRaffleRoutes(app, sheets, spreadsheetId, normalizePhone) {
         });
       }
 
-      // Append winner to Winners sheet
+      // 1. Append winner to Winners sheet
       await sheets.spreadsheets.values.append({
         spreadsheetId,
         range: "Winners!A:D",
@@ -69,6 +80,59 @@ export function setupRaffleRoutes(app, sheets, spreadsheetId, normalizePhone) {
       });
 
       console.log("✅ Winner saved:", participantName);
+
+      // 2. Find and remove the winner from the Players sheet
+      try {
+        // Get all players data (name and phone columns only)
+        const playersRes = await sheets.spreadsheets.values.get({
+          spreadsheetId,
+          range: "Players!A2:B1000",
+        });
+        const rows = playersRes.data.values || [];
+        let rowIndexToDelete = -1;
+        for (let i = 0; i < rows.length; i++) {
+          const rowName = rows[i][0] || "";
+          const rowPhone = rows[i][1] || "";
+          if (
+            rowName.trim().toLowerCase() === participantName.trim().toLowerCase() &&
+            rowPhone.trim() === participantPhone.trim()
+          ) {
+            rowIndexToDelete = i; // 0‑based, relative to A2
+            break;
+          }
+        }
+
+        if (rowIndexToDelete >= 0) {
+          const sheetId = await getSheetId(sheets, spreadsheetId, "Players");
+          // Row numbers in Google Sheets are 1‑based; data starts at row 2 (index 1)
+          const startRowIndex = rowIndexToDelete + 1; // because header is row 1
+          const endRowIndex = startRowIndex + 1;
+
+          await sheets.spreadsheets.batchUpdate({
+            spreadsheetId,
+            requestBody: {
+              requests: [
+                {
+                  deleteDimension: {
+                    range: {
+                      sheetId: sheetId,
+                      dimension: "ROWS",
+                      startIndex: startRowIndex,
+                      endIndex: endRowIndex,
+                    },
+                  },
+                },
+              ],
+            },
+          });
+          console.log(`🗑️ Removed ${participantName} from Players`);
+        } else {
+          console.warn("⚠️ Could not find player in Players sheet to delete");
+        }
+      } catch (deleteError) {
+        // Log but don’t fail the whole request – the winner is already saved
+        console.error("❌ Error removing player from sheet:", deleteError.message);
+      }
 
       res.json({
         success: true,
@@ -115,6 +179,7 @@ export function setupRaffleRoutes(app, sheets, spreadsheetId, normalizePhone) {
       });
     }
   });
+
   // ========================
   // ADD NEW PARTICIPANT
   // ========================
@@ -127,7 +192,8 @@ export function setupRaffleRoutes(app, sheets, spreadsheetId, normalizePhone) {
           success: false,
           message: "Name and phone are required",
         });
-      }      await sheets.spreadsheets.values.append({
+      }
+      await sheets.spreadsheets.values.append({
         spreadsheetId,
         range: "Players!A:C",
         valueInputOption: "USER_ENTERED",
@@ -152,4 +218,3 @@ export function setupRaffleRoutes(app, sheets, spreadsheetId, normalizePhone) {
     }
   });
 }
-
