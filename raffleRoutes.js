@@ -16,21 +16,23 @@ async function getSheetId(sheets, spreadsheetId, sheetName) {
 export function setupRaffleRoutes(app, sheets, spreadsheetId, normalizePhone) {
   // ========================
   // GET PARTICIPANTS
+  // Players columns: A = Ticket Display ID, B = Buyer's Name
   // ========================
   app.get("/api/raffle/participants", async (req, res) => {
     try {
       const response = await sheets.spreadsheets.values.get({
         spreadsheetId,
-        range: "Players!A2:C1000",
+        range: "Players!A2:B1000",
       });
 
       const rows = response.data.values || [];
-      const participants = rows.map((row, index) => ({
-        id: index,
-        name: row[0] || "Unknown",
-        phone: row[1] || "",
-        email: row[2] || "",
-      }));
+      const participants = rows
+        .filter(row => row[0] || row[1]) // skip completely empty rows
+        .map((row, index) => ({
+          id: index,
+          phone: row[0] || "Unknown",        // Ticket Display ID → phone (frontend expects this)
+          name: row[1] || "Unknown",          // Buyer's Name → name
+        }));
 
       console.log("✅ Fetched participants count:", participants.length);
 
@@ -50,19 +52,21 @@ export function setupRaffleRoutes(app, sheets, spreadsheetId, normalizePhone) {
 
   // ========================
   // SAVE WINNER (and remove from Players)
+  // Winners columns: A = Winner Name, B = Ticket Display ID, C = Date/Time, D = Status
   // ========================
   app.post("/api/raffle/save-winner", async (req, res) => {
     try {
-      const { participantId, participantName, participantPhone, timestamp } = req.body;
+      const { participantName, participantPhone, timestamp } = req.body;
 
       if (!participantName || !participantPhone) {
         return res.status(400).json({
           success: false,
-          message: "Participant name and phone are required",
+          message: "Participant name and Ticket Display ID are required",
         });
       }
 
       // 1. Append winner to Winners sheet
+      // Columns: A = Winner Name, B = Ticket Display ID, C = Date/Time, D = Status
       await sheets.spreadsheets.values.append({
         spreadsheetId,
         range: "Winners!A:D",
@@ -70,20 +74,20 @@ export function setupRaffleRoutes(app, sheets, spreadsheetId, normalizePhone) {
         requestBody: {
           values: [
             [
-              participantName,
-              participantPhone,
-              new Date(timestamp).toLocaleString(),
-              "WINNER",
+              participantName,                                    // A: Winner Name
+              participantPhone,                                   // B: Ticket Display ID
+              new Date(timestamp).toLocaleString(),               // C: Date/Time
+              "WINNER",                                           // D: Status
             ],
           ],
         },
       });
 
-      console.log("✅ Winner saved:", participantName);
+      console.log("✅ Winner saved:", participantName, "| ID:", participantPhone);
 
       // 2. Find and remove the winner from the Players sheet
+      // Players: A = Ticket Display ID, B = Buyer's Name
       try {
-        // Get all players data (name and phone columns only)
         const playersRes = await sheets.spreadsheets.values.get({
           spreadsheetId,
           range: "Players!A2:B1000",
@@ -91,11 +95,11 @@ export function setupRaffleRoutes(app, sheets, spreadsheetId, normalizePhone) {
         const rows = playersRes.data.values || [];
         let rowIndexToDelete = -1;
         for (let i = 0; i < rows.length; i++) {
-          const rowName = rows[i][0] || "";
-          const rowPhone = rows[i][1] || "";
+          const rowId = (rows[i][0] || "").trim();
+          const rowName = (rows[i][1] || "").trim();
           if (
-            rowName.trim().toLowerCase() === participantName.trim().toLowerCase() &&
-            rowPhone.trim() === participantPhone.trim()
+            rowId === participantPhone.trim() &&
+            rowName.toLowerCase() === participantName.trim().toLowerCase()
           ) {
             rowIndexToDelete = i; // 0‑based, relative to A2
             break;
@@ -104,8 +108,7 @@ export function setupRaffleRoutes(app, sheets, spreadsheetId, normalizePhone) {
 
         if (rowIndexToDelete >= 0) {
           const sheetId = await getSheetId(sheets, spreadsheetId, "Players");
-          // Row numbers in Google Sheets are 1‑based; data starts at row 2 (index 1)
-          const startRowIndex = rowIndexToDelete + 1; // because header is row 1
+          const startRowIndex = rowIndexToDelete + 1; // header is row 1
           const endRowIndex = startRowIndex + 1;
 
           await sheets.spreadsheets.batchUpdate({
@@ -125,12 +128,11 @@ export function setupRaffleRoutes(app, sheets, spreadsheetId, normalizePhone) {
               ],
             },
           });
-          console.log(`🗑️ Removed ${participantName} from Players`);
+          console.log(`🗑️ Removed ${participantName} (ID: ${participantPhone}) from Players`);
         } else {
           console.warn("⚠️ Could not find player in Players sheet to delete");
         }
       } catch (deleteError) {
-        // Log but don’t fail the whole request – the winner is already saved
         console.error("❌ Error removing player from sheet:", deleteError.message);
       }
 
@@ -150,6 +152,7 @@ export function setupRaffleRoutes(app, sheets, spreadsheetId, normalizePhone) {
 
   // ========================
   // GET PREVIOUS WINNERS
+  // Winners columns: A = Winner Name, B = Ticket Display ID, C = Date/Time, D = Status
   // ========================
   app.get("/api/raffle/winners", async (req, res) => {
     try {
@@ -159,12 +162,14 @@ export function setupRaffleRoutes(app, sheets, spreadsheetId, normalizePhone) {
       });
 
       const rows = response.data.values || [];
-      const winners = rows.map((row) => ({
-        name: row[0] || "Unknown",
-        phone: row[1] || "",
-        timestamp: row[2] || "",
-        status: row[3] || "WINNER",
-      }));
+      const winners = rows
+        .filter(row => row[0] || row[1])
+        .map((row) => ({
+          name: row[0] || "Unknown",           // A: Winner Name
+          phone: row[1] || "",                  // B: Ticket Display ID (kept as phone for frontend)
+          timestamp: row[2] || "",              // C: Date/Time
+          status: row[3] || "WINNER",           // D: Status
+        }));
 
       res.json({
         success: true,
@@ -182,27 +187,28 @@ export function setupRaffleRoutes(app, sheets, spreadsheetId, normalizePhone) {
 
   // ========================
   // ADD NEW PARTICIPANT
+  // Players columns: A = Ticket Display ID, B = Buyer's Name
   // ========================
   app.post("/api/raffle/add-participant", async (req, res) => {
     try {
-      const { name, phone, email } = req.body;
+      const { name, phone } = req.body;
 
       if (!name || !phone) {
         return res.status(400).json({
           success: false,
-          message: "Name and phone are required",
+          message: "Name and Ticket Display ID are required",
         });
       }
       await sheets.spreadsheets.values.append({
         spreadsheetId,
-        range: "Players!A:C",
+        range: "Players!A:B",
         valueInputOption: "USER_ENTERED",
         requestBody: {
-          values: [[name, normalizePhone(phone), email || ""]],
+          values: [[phone, name]],   // A = Ticket Display ID, B = Buyer's Name
         },
       });
 
-      console.log("✅ Participant added:", name);
+      console.log("✅ Participant added:", name, "| ID:", phone);
 
       res.json({
         success: true,
